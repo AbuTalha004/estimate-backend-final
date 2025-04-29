@@ -138,6 +138,11 @@ async def generate_pdf(data: dict):
         pdf.ln(10)
         pdf.multi_cell(0, 10, f"Notes: {notes}")
 
+    @app.get("/test-cors")
+def test_cors():
+    return {"message": "CORS is working"}
+
+
     # Disclaimer and Signature
     pdf.ln(10)
     pdf.set_font("Arial", size=10)
