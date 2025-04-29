@@ -11,13 +11,16 @@ import datetime
 # Initialize FastAPI app
 app = FastAPI()
 
-# Allow CORS for all origins (frontend communication)
+from fastapi.middleware.cors import CORSMiddleware
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://quickestimate.site"],  # Only allow your frontend
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Load OpenAI API key from environment variable
 openai.api_key = os.getenv("OPENAI_API_KEY")
