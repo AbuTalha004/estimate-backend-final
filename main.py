@@ -10,39 +10,32 @@ import datetime
 
 # Initialize FastAPI app
 app = FastAPI()
-# Trigger redeploy
 
-from fastapi.middleware.cors import CORSMiddleware
-
+# ✅ Fix CORS to allow only your live domain
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://quickestimate.site"],  # Only allow your frontend
+    allow_origins=["https://quickestimate.site"],  # Your real frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# Load OpenAI API key from environment variable
+# OpenAI API key (set in Render environment variables)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# -------------------------------
-# Endpoint 1: /transcribe-and-parse
-# Transcribes voice + parses estimate fields
-# -------------------------------
 @app.post("/transcribe-and-parse")
 async def transcribe_and_parse(file: UploadFile = File(...)):
-    # Save uploaded file temporarily
+    # Save uploaded audio temporarily
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 
-    # 1. Send to Whisper (OpenAI Speech-to-Text)
+    # Transcribe audio using Whisper
     audio_file = open(tmp_path, "rb")
     transcript = openai.Audio.transcribe("whisper-1", audio_file)
     text = transcript["text"]
 
-    # 2. Parse transcript using ChatGPT
+    # ChatGPT prompt to extract form data with correction handling
     prompt = """
     You are an expert Estimate Form Assistant for skilled laborers in the U.S.
     Extract the following fields:
@@ -55,7 +48,6 @@ async def transcribe_and_parse(file: UploadFile = File(...)):
     If speaker uses correction keywords ("correction", "wait", "change", etc.), apply corrections.
 
     Output final corrected form in this JSON format:
-
     {
       "Client Name": "",
       "Job Type": "",
@@ -82,21 +74,17 @@ async def transcribe_and_parse(file: UploadFile = File(...)):
 
     return {"transcript": text, "parsed_data": result_json}
 
-# -------------------------------
-# Endpoint 2: /generate-pdf
-# Accepts parsed data and returns generated PDF
-# -------------------------------
+
 @app.post("/generate-pdf")
 async def generate_pdf(data: dict):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
 
-    # Company Info
+    # Header
     pdf.cell(200, 10, txt="TradesMate Services", ln=True, align='C')
     pdf.ln(10)
 
-    # Estimate Info
     today = datetime.date.today()
     valid_until = today + datetime.timedelta(days=30)
     estimate_id = f"EST-{int(datetime.datetime.now().timestamp())}"
@@ -106,16 +94,15 @@ async def generate_pdf(data: dict):
     pdf.cell(0, 10, f"Valid Until: {valid_until.strftime('%Y-%m-%d')}", ln=True)
     pdf.ln(10)
 
-    # Client Info
+    # Client info
     pdf.cell(0, 10, f"Client Name: {data.get('Client Name', '')}", ln=True)
     pdf.cell(0, 10, f"Job Type: {data.get('Job Type', '')}", ln=True)
     pdf.ln(5)
 
-    # Job Description
     pdf.multi_cell(0, 10, f"Job Description: {data.get('Job Description', '')}")
     pdf.ln(5)
 
-    # Items Table
+    # Items
     items = data.get("Items", [])
     pdf.cell(60, 10, "Item", border=1)
     pdf.cell(30, 10, "Qty", border=1)
@@ -128,23 +115,22 @@ async def generate_pdf(data: dict):
         desc = item.get("Description", "")
         qty = item.get("Quantity", 0)
         price = item.get("Unit Price", 0)
-        line_total = qty * price
-        subtotal += line_total
+        total = qty * price
+        subtotal += total
 
         pdf.cell(60, 10, str(desc), border=1)
         pdf.cell(30, 10, str(qty), border=1)
         pdf.cell(40, 10, f"${price:.2f}", border=1)
-        pdf.cell(40, 10, f"${line_total:.2f}", border=1)
+        pdf.cell(40, 10, f"${total:.2f}", border=1)
         pdf.ln()
 
-    # Subtotal and Total
-    tax = subtotal * 0.10  # 10% tax
-    total = subtotal + tax
+    tax = subtotal * 0.10
+    grand_total = subtotal + tax
 
     pdf.ln(5)
     pdf.cell(0, 10, f"Subtotal: ${subtotal:.2f}", ln=True)
     pdf.cell(0, 10, f"Tax (10%): ${tax:.2f}", ln=True)
-    pdf.cell(0, 10, f"Total Estimate: ${total:.2f}", ln=True)
+    pdf.cell(0, 10, f"Total Estimate: ${grand_total:.2f}", ln=True)
 
     # Notes
     notes = data.get("Notes", "")
@@ -152,17 +138,14 @@ async def generate_pdf(data: dict):
         pdf.ln(10)
         pdf.multi_cell(0, 10, f"Notes: {notes}")
 
-    # Disclaimer
+    # Disclaimer and Signature
     pdf.ln(10)
     pdf.set_font("Arial", size=10)
     pdf.multi_cell(0, 10, "Disclaimer: This estimate is valid for 30 days. Final invoice may vary based on actual work and materials.")
-
-    # Signature
     pdf.ln(20)
     pdf.cell(0, 10, "Client Signature: ______________________", ln=True)
     pdf.cell(0, 10, "Date: ________________________________", ln=True)
 
-    # Output PDF
     pdf_output = io.BytesIO()
     pdf.output(pdf_output)
     pdf_output.seek(0)
